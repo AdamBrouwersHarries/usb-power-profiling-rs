@@ -1,16 +1,16 @@
 use actix_web::get;
 use actix_web::web::Data;
 use actix_web::{App, HttpRequest, HttpResponse, HttpServer, Responder};
+use core::fmt;
 use device::shizuku::ShizukuDevice;
 use rusb::UsbContext;
-use core::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
 mod device;
-use device::{DeviceInterface, USBDevice};
+use device::{Device, DeviceInterface, USBDevice};
 // use device::dummy::DummyDevice;
 
 // Provide an object-safe wrapper around a device interface, and also provide
@@ -24,6 +24,13 @@ impl PowerMeter {
     fn from(di: Box<dyn DeviceInterface>) -> PowerMeter {
         PowerMeter {
             underlying_device: Arc::new(di),
+        }
+    }
+
+    fn try_from(r: Result<Box<dyn DeviceInterface>, USBDevice>) -> Result<PowerMeter, USBDevice> {
+        match r {
+            Ok(d) => Ok(PowerMeter::from(d)),
+            Err(d) => Err(d),
         }
     }
 
@@ -96,8 +103,12 @@ impl PowerSampler {
     pub fn find_meters(&mut self) -> rusb::Result<()> {
         let devices = self.usb_context.devices()?;
         for device in devices.iter() {
-            if let Some(sd) = ShizukuDevice::try_create(USBDevice::from_device(device)) {
-                self.meters.push(PowerMeter::from(Box::new(sd)));
+            if let Ok(pm) = Result::Err(device)
+                .or_else(|d| ShizukuDevice::try_create(d))
+                .or_else(|d| ShizukuDevice::try_create(d))
+                .and_then(|d| Ok(PowerMeter::from(d)))
+            {
+                self.add_device(pm);
             }
         }
         Ok(())

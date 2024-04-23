@@ -20,13 +20,11 @@ pub struct ShizukuDevice {
     handle: Mutex<i32>,
     device_handle: Mutex<USBDevice>,
     stop_flag: AtomicBool,
-    endpoint_in: Option<i32>,
-    endpoint_out: Option<i32>,
     last_request_id: Option<i32>,
     explected_replies: Option<i32>,
 }
 
-impl ShizukuDevice {
+impl ShizukuDevice{
     // pub fn init() -> ShizukuDevice {
     //     ShizukuDevice {
     //         handle: Mutex::new(42),
@@ -39,7 +37,7 @@ impl ShizukuDevice {
     // }
 }
 
-impl Display for ShizukuDevice {
+impl Display for ShizukuDevice{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // For now, let's just print the underlying device:
         let guard = self.device_handle.lock();
@@ -51,23 +49,20 @@ impl Display for ShizukuDevice {
 }
 
 impl DeviceInterface for ShizukuDevice {
-    fn try_create(device: USBDevice) -> Option<Self>
+    fn try_create(device: Device) -> Result<Box<Self>, Device>
     where
         Self: Sized,
     {
-        if device.matches_product_ids(&SHIZUKU_PRODUCT_IDS) {
-            Some(ShizukuDevice {
+        USBDevice::create_if_matching_id(device, &SHIZUKU_PRODUCT_IDS).and_then(|usbdevice| {
+            usbdevice.query();
+            Ok(Box::new(ShizukuDevice {
                 handle: Mutex::new(42),
-                device_handle: Mutex::new(device),
+                device_handle: Mutex::new(usbdevice),
                 stop_flag: false.into(),
-                endpoint_in: None,
-                endpoint_out: None,
                 last_request_id: None,
                 explected_replies: None,
-            })
-        } else {
-            None
-        }
+            }))
+        })
     }
     fn sample(&self) -> f32 {
         let g = self.handle.lock().unwrap();
@@ -75,6 +70,12 @@ impl DeviceInterface for ShizukuDevice {
     }
 
     fn start_sampling(&self) {
+        // Lock the device, so only we can use it.
+        let mut device_handle = self.device_handle.lock().unwrap();
+        // Reset the device.
+        let _ = device_handle.reset().unwrap();
+        let (endpoint_in, endpoint_out) = device_handle.find_bulk_in_out_end_points().unwrap();
+
         let interval = Duration::from_millis(500);
         loop {
             // unlock the handle and modify
